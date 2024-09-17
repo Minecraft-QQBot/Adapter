@@ -10,25 +10,27 @@ from nonebot import get_plugin_config
 
 from .config import Config
 from .logger import log
+from .server import Server
+from .utils import parse_response
 from nonebot.adapters.onebot.v11 import Adapter as OneBotV11Adapter
 
 
 class Adapter(BaseAdapter):
     config: Optional[Config] = None
-    server_connections: Dict[str, Any] = {}
+    servers: Dict[str, Server] = {}
 
     @override
     def __init__(self, driver: Driver, **kwargs):
         BaseAdapter.__init__(self, driver, **kwargs)
         self.config = get_plugin_config(Config)
-        self.setup()
+        self._setup()
 
     @classmethod
     @override
     def get_name(cls) -> str:
         return 'minecraft'
 
-    def setup(self) -> None:
+    def _setup(self) -> None:
         if not isinstance(self.driver, ASGIMixin):
             raise RuntimeError(
                 F'Current driver {self.config.driver} does not support websocket client connections!'
@@ -42,10 +44,11 @@ class Adapter(BaseAdapter):
         self.setup_websocket_server(server_setup)
 
     async def on_shutdown(self):
-        pass
+        for websocket in self.servers.values():
+            await websocket.close()
 
-    async def _call_api(self, bot: Bot, api: str, **data: Any) -> Any:
-        pass
+    async def _call_api(self, bot: Server, api: str, **data: Any) -> Any:
+        return await bot.call_api(api, **data)
 
     async def _handle_websocket(self, websocket: WebSocket):
         name = websocket.request.headers.get('name')
@@ -57,18 +60,23 @@ class Adapter(BaseAdapter):
             log('warning', F'No name provided from server "{name}".')
             await websocket.close(403, 'No name provided.')
             return None
-        if name in self.server_connections:
+        if name in self.servers:
             log('warning', F'Name "{name}" has already occupied.')
             await websocket.close(403, F'Name "{name}" has already occupied.')
             return None
         await websocket.accept()
+        server = Server(self, name, websocket)
+        self.servers.setdefault(name, server)
+        self.bot_connect(server)
         log('success', F'The server "{name}" has connected.')
         try:
-            pass
+            while True:
+                event_type, data = parse_response(await websocket.receive())
+                handle_task = asyncio.create_task(server.handle_event(event_type, data))
         except WebSocketClosed:
             log('warning', F'The server "{name}" has disconnected.')
         finally:
             with contextlib.suppress(Exception):
                 await websocket.close()
-            self.server_connections.pop(name, None)
-            self.bot_disconnect(name)
+            self.servers.pop(name, None)
+            self.bot_disconnect(server)
