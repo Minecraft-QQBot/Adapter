@@ -48,7 +48,10 @@ class Adapter(BaseAdapter):
             await websocket.close()
 
     async def _call_api(self, bot: Server, api: str, **data: Any) -> Any:
-        return await bot.call_api(api, **data)
+        if api in ('get_occupation', 'get_player_list', 'get_player_info', 'broadcast', 'send_message'):
+            api_function = getattr(bot, api)
+            return await api_function(**data)
+        raise ValueError(F'API "{api}" not found.')
 
     async def _handle_websocket(self, websocket: WebSocket):
         name = websocket.request.headers.get('name')
@@ -72,7 +75,7 @@ class Adapter(BaseAdapter):
         try:
             while True:
                 event_type, data = parse_response(await websocket.receive())
-                handle_task = asyncio.create_task(server.handle_event(event_type, data))
+                await server.handle_event(event_type, data)
         except WebSocketClosed:
             log('warning', F'The server "{name}" has disconnected.')
         finally:

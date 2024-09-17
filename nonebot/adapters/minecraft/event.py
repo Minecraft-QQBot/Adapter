@@ -1,5 +1,5 @@
 from uuid import UUID
-from typing_extensions import Union, override
+from typing_extensions import Optional, Union, override
 from pydantic import BaseModel
 
 from nonebot.adapters import Event as BaseEvent
@@ -9,7 +9,7 @@ from .message import MessageSegment, Message
 
 class Player(BaseModel):
     name: str
-    uuid: UUID
+    uuid: Optional[UUID]
 
 
 class ServerEvent(BaseEvent):
@@ -141,11 +141,3 @@ class PlayerMessageEvent(PlayerEvent):
     @override
     def get_event_description(self) -> str:
         return F'{self.player.name} sent a message to the server "{self.server_name}": {self.message}'
-
-
-__minecraft_mapping = (
-    PlayerLeftEvent,
-    PlayerJoinedEvent,
-    PlayerDeathEvent,
-    PlayerMessageEvent
-)

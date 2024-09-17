@@ -1,5 +1,6 @@
 from json import dumps
-from typing import override, Optional, Union, Any
+from uuid import UUID
+from typing import override, Optional, Union, Dict, Any
 
 from nonebot import Bot as BaseBot
 from nonebot.adapters import Adapter
@@ -7,13 +8,14 @@ from nonebot.drivers import WebSocket
 from nonebot.exception import ActionFailed
 from nonebot.message import handle_event
 
+from .event import *
 from .utils import parse_response, dump
-from .playerevent import PlayerMessageEvent, Player
 from .message import Message, MessageSegment
 
 
 class Server(BaseBot):
     websocket: WebSocket = None
+    player_uuids: Dict[str, UUID] = {}
 
     @override
     def __init__(self, adapter: Adapter, name: str, websocket: WebSocket):
@@ -29,9 +31,30 @@ class Server(BaseBot):
     ) -> None:
         await self.send_message(event.player, message)
 
-    async def handle_event(self, event_type: int, data: Any):
+    async def _send_data(self, flag: int, data: list, has_response: bool = True) -> Optional[list]:
+        await self.websocket.send(dump(flag, data))
+        if not has_response: return
+        success, response = parse_response(await self.websocket.receive())
+        return response if success else None
 
-        await handle_event(self, event_type, data)
+    async def handle_event(self, event_type: int, data: list):
+        if not (1 <= event_type <= 7):
+            raise ValueError(F'Invalid event id "{event_type}"')
+        if event_type == 1:
+            name = data[0]
+            player = Player(name=name, uuid=self.player_uuids.get(name))
+            event = PlayerLeftEvent(player=player)
+        elif event_type == 2:
+            name, uuid = data
+            uuid = UUID(uuid)
+            self.player_uuids[name] = uuid
+            player = Player(name=name, uuid=uuid)
+            event = PlayerJoinedEvent(player=player)
+        elif event_type == 3:
+            name = data[0]
+            player = Player(name=name, uuid=self.player_uuids.get(name))
+            event = PlayerDeathEvent(player=player)
+        await handle_event(self, event)
 
     async def get_occupation(self) -> list:
         response = await self._send_data(3, [])
@@ -83,9 +106,3 @@ class Server(BaseBot):
         elif isinstance(message, Message):
             message = message.to_dict()
         await self._send_data(8, [player, message], False)
-
-    async def _send_data(self, flag: int, data: list, has_response: bool = True) -> Optional[list]:
-        await self.websocket.send(dump(flag, data))
-        if not has_response: return
-        success, response = parse_response(await self.websocket.receive())
-        return response if success else None
